@@ -15,6 +15,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Pytorch Distillation Experiment')
 parser.add_argument('--arch', metavar='ARCH', default='alexnet', type=str, help='model architecture')
 parser.add_argument('--data_name', metavar='DATA_NAME', type=str, default='Flower102', help='dataset name')
+parser.add_argument('--zero_train', default=False, type=bool, help='choose if train from Scratch or not')
 
 args = parser.parse_args()
 
@@ -187,6 +188,7 @@ class ModifiedAlexNet(nn.Module):
         return x
 
 
+
 def main():
     # you should set data path on the top
     global train_path, val_path, test_path
@@ -222,6 +224,7 @@ def main():
         train_val_test(model, train_loader, val_loader, test_loader, optimizer=None, epoches=50)
     elif 'Birds200' in train_path:
         train_test(model, train_loader, test_loader, optimizer=None, epoches=10)
+
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,7 @@
 Birds200/
 Flower102/
 models/*.pth
+1x1models/
+1x1models_fromScratch/
+CatDog/
+log/

@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.nn import functional as F
 import utils.dataset as dataset
+from utils.sgd import SGD
 import torchvision
 import torchvision.datasets.folder as folder
 import math
@@ -17,7 +18,8 @@ import argparse
 parser = argparse.ArgumentParser(description='Pytorch Distillation Experiment')
 parser.add_argument('--arch', metavar='ARCH', default='alexnet', help='model architecture')
 parser.add_argument('--data_name', metavar='DATA_NAME', type=str, default='Flower102', help='dataset name')
-parser.add_argument('--zero_train', default=False, type=bool, help='choose if train from Scratch or not')
+parser.add_argument('--zero_train', default=False, action='store_true', help='choose if train from Scratch or not')
+
 
 args = parser.parse_args()
 
@@ -28,7 +30,7 @@ if not os.path.exists(log_path):
     os.mkdir(log_path)
 
 # you should assign log_name first such as mobilenet_resnet50_CIFAR10.log
-log_name = 'hhhh.log'
+log_name = '1x1zerocatdog-weight_decay1-1e-3.log'
 TrainInfoPath = os.path.join(log_path, log_name)
 # formater
 formatter = logging.Formatter('%(levelname)s %(message)s')
@@ -47,7 +49,7 @@ if getpass.getuser() == 'tsq':
     train_batch_size = 8
 else:
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    train_batch_size = 32
+    train_batch_size = 64
 
 use_gpu = torch.cuda.is_available()
 num_batches = 0
@@ -116,15 +118,14 @@ def train_epoch(model, train_loader, optimizer=None):
 def train_test(model, train_loader, test_loader, optimizer=None, epoches=10):
     print("Start training.")
     if optimizer is None:
-        optimizer = optim.SGD(model.parameters(), lr = 0.001, momentum=0.9)
+        optimizer = optim.SGD(model.classifier.parameters(), lr = 0.001, momentum=0.9)
 
     for i in range(epoches):
         model.train()
         print("Epoch: ", i)
         train_epoch(model, train_loader, optimizer)
-        if i%10==0:
-            acc = test(model, test_loader)
-        filename = './models/' + args.arch + '_' + args.data_name + '_' + str(acc) + '.pth'
+        acc = test(model, test_loader)
+        filename = './1x1models_fromScratch/' + '1x1fromScratch'+args.arch + '_' + args.data_name + '_' + str(acc) + '.pth'
         torch.save(model.state_dict(), filename)
     print("Finished training.")
 
@@ -132,30 +133,28 @@ def train_test(model, train_loader, test_loader, optimizer=None, epoches=10):
 def train_val_test(model, train_loader, val_loader, test_loader, optimizer=None, epoches=10):
     print("Start training.")
     if optimizer is None:
-        optimizer = optim.SGD(model.parameters(), lr = 0.001, momentum=0.9)
+        optimizer = optim.SGD(model.classifier.parameters(), lr = 0.04, momentum=0.9)
 
     for i in range(epoches):
         model.train()
         infoLogger.info("Epoch: "+str(i))
         train_epoch(model, train_loader, optimizer)
-        if i%10==0:
-            acc = val_test(model, val_loader, test_loader)
-            filename = './1x1models/' + '1x1' + args.arch + '_' + args.data_name + '_' + str(acc) + '.pth'
-            state = model.state_dict()
-            torch.save(state, filename)
-        else:
-            state = model.state_dict()
-        s1x1ParaName = ['features1.3.weight','features2.3.weight','features3.2.weight','features4.2.weight','features5.3.weight']
+        # if i%100==0:
+        acc = val_test(model, val_loader, test_loader)
+        filename = './1x1models/weightDecay5e-3/' + 'finetuned-weight_decay1-5e-3' + args.arch + '_' + args.data_name + '_' + str(acc) + '.pth'
+        torch.save(model.state_dict(), filename)
+        state = model.state_dict()
+        s1x1ParaName = ['features12.0.weight', 'features22.0.weight', 'features32.0.weight', 'features42.0.weight', 'features52.0.weight']
         for name in s1x1ParaName:
-            sumStr = name+'  sum  is: '+str(state[name].sum())
+            sumStr = name+'  sum  is: '+str(torch.abs(state[name]).sum())
             meanStr = name+'  mean is: '+str(torch.mean(state[name]))
             stdStr = name+'  std  is: '+str(torch.std(state[name]))
             infoLogger.info(sumStr)
             infoLogger.info(meanStr)
             infoLogger.info(stdStr)
-
     infoLogger.info("Finished training.")
 
+# add a 1x1 depthwise conv layer between former conv layers
 # add a 1x1 depthwise conv layer between former conv layers
 class AddLayerAlexNet(nn.Module):
     def __init__(self, num_classes=2):
@@ -266,6 +265,31 @@ class AddLayerAlexNet(nn.Module):
         x = self.classifier(x)
         return x
 
+class ModifiedAlexNet(nn.Module):
+    def __init__(self, num_classes=2):
+        super(ModifiedAlexNet, self).__init__()
+        model = torchvision.models.alexnet(pretrained=False)
+        self.features = model.features
+        for param in self.features.parameters():
+            param.requires_grad = True
+
+        self.num_classes = num_classes
+        self.classifier = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(256 * 6 * 6, 4096),
+            nn.ReLU(inplace=True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = self.classifier(x)
+        return x
+
 # for alxenet, 1x1 layers indexs should be [2 5 8 11 14]
 # all layers indexs is [0 1 2 .... 20] 21=16+5
 # 1x1 model load paras from original model 
@@ -280,6 +304,35 @@ def my_load_state_dict(model, state_dict):
             own_state.items()[i][1].copy_(state_dict.items()[j][1])
             j +=1
 
+# init weight as Alexnet paper does while training from scratch
+def weights_init(model):
+    for i, m1 in enumerate(model.children()):
+        for j, m2 in enumerate(m1):
+            if isinstance(m2, nn.Conv2d):
+                # init Conv2d m2.weight.data
+                if i in [0,1,4]:
+                    if j==0:
+                        nn.init.normal(m2.weight.data, mean=0, std=0.01)
+                    elif j==3:
+                        nn.init.constant(m2.weight.data,1)
+                else:
+                    if j==0:
+                        nn.init.normal(m2.weight.data, mean=0, std=0.01)
+                    elif j==2:
+                        nn.init.constant(m2.weight.data,1)
+                # init Conv2d m2.bias.data
+                if i in [1,3,4]:
+                    if j==0:
+                        nn.init.constant(m2.bias.data,1)
+                else:
+                    if j==0:
+                        nn.init.constant(m2.bias.data,0)
+            elif isinstance(m2, nn.Linear):
+                # init Linear m2.weight.data
+                nn.init.normal(m2.weight.data, mean=0, std=0.01)
+                # init Linear m2.bias.data
+                nn.init.constant(m2.bias.data,1)
+
 
 def main():
     # you should set data path on the top
@@ -292,14 +345,24 @@ def main():
     elif 'Birds200' in args.data_name:
         train_path = "./Birds200/train"
         test_path = "./Birds200/test"
+    elif 'catdog' in args.data_name:
+        train_path = "./CatDog/train"
+        test_path = "./CatDog/test"
     # global train_path, test_path
     if 'Flower102' in train_path:
         model = AddLayerAlexNet(102)
+        # model = ModifiedAlexNet(102)
         train_loader = dataset.train_loader(train_path, batch_size=train_batch_size, num_workers=4, pin_memory=True)
         val_loader = dataset.test_loader(val_path, batch_size=1, num_workers=4, pin_memory=True)
         test_loader = dataset.test_loader(test_path, batch_size=1, num_workers=4, pin_memory=True)
     elif 'Birds200' in train_path:
         model = AddLayerAlexNet(200)
+        # model = ModifiedAlexNet(200)
+        train_loader = dataset.train_loader(train_path, batch_size=train_batch_size, num_workers=4, pin_memory=True)
+        test_loader = dataset.test_loader(test_path, batch_size=1, num_workers=4, pin_memory=True)
+    elif 'catdog' in args.data_name:
+        model = AddLayerAlexNet(2)
+        # model = ModifiedAlexNet(2)
         train_loader = dataset.train_loader(train_path, batch_size=train_batch_size, num_workers=4, pin_memory=True)
         test_loader = dataset.test_loader(test_path, batch_size=1, num_workers=4, pin_memory=True)
     if use_gpu:
@@ -307,15 +370,37 @@ def main():
         print("Use GPU!")
     else:
         print("Use CPU!")
+    infoLogger.info("dataset is: "+args.data_name)
 
-    checkpoint = torch.load('./1x1models/origin1x1alexnet_Flower102_0.789.pth')
-    model.load_state_dict(checkpoint, strict=True)
-
-    if 'Flower102' in train_path:
-        train_val_test(model, train_loader, val_loader, test_loader, optimizer=None, epoches=50)
-    elif 'Birds200' in train_path:
-        train_test(model, train_loader, test_loader, optimizer=None, epoches=10)
-
+    if not args.zero_train:
+        infoLogger.info("zero_train is: "+str(args.zero_train))
+        if 'Flower102' in train_path:
+            state_dict = torch.load('./models/alexnet_Flower102_0.789.pth')
+            my_load_state_dict(model, state_dict)
+            torch.save(model.state_dict(), './1x1models/origin1x1alexnet_Flower102_0.789.pth')
+            optimizer = SGD([
+                # {'params': model.features12.parameters()},   #  浅层1x1不好剪枝, 先冻住
+                {'params': model.features22.parameters()},
+                {'params': model.features32.parameters()},
+                {'params': model.features42.parameters()},
+                {'params': model.features52.parameters()},
+            ], weight_decay1=5e-3, lr=1e-1, momentum=0.9)
+            infoLogger.info("weight_decay1 is: "+str(1e-3))
+            train_val_test(model, train_loader, val_loader, test_loader, optimizer=optimizer, epoches=10000)
+        elif 'Birds200' in train_path:
+            train_test(model, train_loader, test_loader, optimizer=None, epoches=1000)
+    else:
+        infoLogger.info("zero_train is: "+str(args.zero_train))
+        if 'Flower102' in train_path:
+            # weights_init(model)
+            initLr = 0.01
+            optimizer = optim.SGD(model.parameters(), lr = initLr, momentum=0.9)
+            train_val_test(model, train_loader, val_loader, test_loader, optimizer=optimizer, epoches=10000)
+        elif 'catdog' in args.data_name:
+            # weights_init(model)
+            initLr = 0.01
+            optimizer = optim.SGD(model.parameters(), lr = initLr, momentum=0.9)
+            train_test(model, train_loader, test_loader, optimizer=optimizer, epoches=100)
 
 
 
@@ -323,20 +408,8 @@ if __name__ == "__main__":
     main()
 
 
-# usage
-# python alexnetPrune.py --arch alexnet --data_name Flower102
 
-
-############predict single img############
-#     classes, class_to_idx = folder.find_classes('./Flower102/train/')
-#     # load one jpg, convert to Variable
-#     root = '/home/smiles/ModelPruning/Flower102/test'
-#     path = '/home/smiles/ModelPruning/Flower102/test/44/image_07150.jpg'
-#     label_id = class_to_idx[path.split('/')[-2]]
-#     img, null = dataset.get_single_img(root, path, train=False)
-#     inputVariable = Variable(img)
-#     model.eval()
-#     output = model(inputVariable)
-#     pred_label = output.data.max(1)[1]
-#     print "true label is: ",label_id
-#     print "pred label is: ",pred_label.numpy()[0]
+# usage 
+# python 1x1zeroTrainalexnet.py --arch alexnet --data_name Flower102 --zero_train
+# python 1x1zeroTrainalexnet.py --arch alexnet --data_name Flower102 # default False
+# python 1x1zeroTrainalexnet.py --arch alexnet --data_name catdog --zero_train True
