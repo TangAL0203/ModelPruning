@@ -379,7 +379,7 @@ def main():
             my_load_state_dict(model, state_dict)
             torch.save(model.state_dict(), './1x1models/origin1x1alexnet_Flower102_0.789.pth')
             optimizer = SGD([
-                # {'params': model.features12.parameters()},   #  浅层1x1不好剪枝, 先冻住
+                {'params': model.features12.parameters()},   #  浅层1x1不好剪枝, 先冻住
                 {'params': model.features22.parameters()},
                 {'params': model.features32.parameters()},
                 {'params': model.features42.parameters()},
