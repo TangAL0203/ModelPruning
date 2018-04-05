@@ -276,7 +276,7 @@ def add1x1layers(num_classes, convIndexList=[[]]):
 # state: the previous OrderedDict of model
 def reloadParam(num_classes, state, convIndexList=[[]]):
     global use_gpu
-    if len(convIndexList[0])==0:
+    if len(convIndexList)==1 and len(convIndexList[0])==0:
         convIndexList = []
         convIndexList.append(range(64))
         convIndexList.append(range(192))
@@ -369,12 +369,14 @@ def train1x1withL1(model, data_name='Flower102', threshold=0.1, l1=5e-3, conv1x1
 
     convIndexList = []
 
-    for name in s1x1ParaName:
+    for i, name in enumerate(s1x1ParaName):
         para = state[name]
         para = torch.squeeze(torch.squeeze(torch.squeeze(para,1),1),1)
         temp = []
         for index,value in enumerate(para):
             if abs(value)<=threshold:
+                print i, index # index to be deleted
+            else:
                 temp.append(index)
         convIndexList.append(temp)
 
@@ -394,7 +396,6 @@ def fineTune(model):
     train_val_test(model, train_loader, val_loader, test_loader, optimizer=optimizer, epoches=10)
 
     return state
-
 
 
 
@@ -424,14 +425,14 @@ if __name__ == '__main__':
     # global train_path, test_path
     if 'Flower102' in train_path:
         train_loader = dataset.train_loader(train_path, batch_size=train_batch_size, num_workers=4, pin_memory=True)
-        val_loader = dataset.test_loader(val_path, batch_size=1, num_workers=4, pin_memory=True)
-        test_loader = dataset.test_loader(test_path, batch_size=1, num_workers=4, pin_memory=True)
+        val_loader = dataset.test_loader(val_path, batch_size=32, num_workers=4, pin_memory=True)
+        test_loader = dataset.test_loader(test_path, batch_size=32, num_workers=4, pin_memory=True)
     elif 'Birds200' in train_path:
         train_loader = dataset.train_loader(train_path, batch_size=train_batch_size, num_workers=4, pin_memory=True)
-        test_loader = dataset.test_loader(test_path, batch_size=1, num_workers=4, pin_memory=True)
+        test_loader = dataset.test_loader(test_path, batch_size=32, num_workers=4, pin_memory=True)
     elif 'catdog' in args.data_name:
         train_loader = dataset.train_loader(train_path, batch_size=train_batch_size, num_workers=4, pin_memory=True)
-        test_loader = dataset.test_loader(test_path, batch_size=1, num_workers=4, pin_memory=True)
+        test_loader = dataset.test_loader(test_path, batch_size=32, num_workers=4, pin_memory=True)
 
     infoLogger.info("dataset is: "+args.data_name)
 
@@ -449,6 +450,9 @@ if __name__ == '__main__':
 
     state = model.state_dict()
     convIndexList = train1x1withL1(model, data_name=data_name, threshold=threshold, l1=l1, conv1x1Lr=conv1x1Lr, momentum=momentum, epochs=15)
+    print 'convIndexList is: '
+    print convIndexList
+
     model = reloadParam(num_classes, state, convIndexList=convIndexList)
     fineTune(model)
 

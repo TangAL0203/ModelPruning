@@ -5,3 +5,4 @@ models/*.pth
 1x1models_fromScratch/
 CatDog/
 log/
+ReferenceMaterials/
