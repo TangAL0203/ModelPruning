@@ -16,7 +16,7 @@ import argparse
 
 def get_args():
     parser = argparse.ArgumentParser(description='Pytorch finetune or zero train 1x1 model')
-    parser.add_argument('--arch', metavar='ARCH', default='alexnet', help='model architecture')
+    parser.add_argument('--arch', metavar='ARCH', default='vgg16bn', help='model architecture')
     parser.add_argument('--data_name', metavar='DATA_NAME', type=str, default='Flower102', help='dataset name')
     parser.add_argument('--zero_train', default=False, action='store_true', help='choose if train from Scratch or not')
     parser.add_argument('--checkpoint', default=False, action='store_true', help='choose if train from checkpoint')
@@ -37,7 +37,8 @@ if not os.path.exists(log_path):
     os.mkdir(log_path)
 
 # you should assign log_name first such as mobilenet_resnet50_CIFAR10.log
-log_name = '1x1alexnetFinetune'+args.data_name+'.log'
+
+log_name = '1x1'+arch+'Finetune'+args.data_name+'.log'
 TrainInfoPath = os.path.join(log_path, log_name)
 # formater
 formatter = logging.Formatter('%(levelname)s %(message)s')

@@ -412,6 +412,10 @@ if __name__ == '__main__':
     momentum = args.momentum
     prune = args.prune
 
+    if args.arch == 'alexnet':
+        origconvlist = [64, 192, 384, 256, 256]
+        totalconvnum = sum(origconvlist)
+
     if 'Flower102' in args.data_name:
         train_path = "./Flower102/train"
         test_path = "./Flower102/test"
